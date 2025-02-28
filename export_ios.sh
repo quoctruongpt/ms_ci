@@ -1,57 +1,82 @@
 #!/bin/bash
+set -e  # Dừng script nếu có lỗi
 
 # Lấy thư mục chứa script
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-echo "Thư mục script: $SCRIPT_DIR"
+
+# Tạo thư mục logs nếu chưa tồn tại
+mkdir -p "$SCRIPT_DIR/logs"
 
 # Định nghĩa các biến
 UNITY_PATH="/Applications/Unity/Hub/Editor/2022.3.57f1/Unity.app/Contents/MacOS/Unity"
-PROJECT_PATH="$SCRIPT_DIR/MonkeyStories_UN" # Đường dẫn đến dự án Unity
-RN_PROJECT_PATH="$SCRIPT_DIR/MonkeyStories" # Đường dẫn đến dự án React Native
-EXPORT_PATH="$SCRIPT_DIR/unity_ios_build" # Xuất tạm ra thư mục ngoài RN project
-FINAL_IOS_PATH="$RN_PROJECT_PATH/unity/builds/ios" # Thư mục lưu framework cuối cùng
+PROJECT_PATH="$SCRIPT_DIR/MonkeyStories_UN"
+RN_PROJECT_PATH="$SCRIPT_DIR/MonkeyStories"
+EXPORT_PATH="$SCRIPT_DIR/unity_ios_build"
+FINAL_IOS_PATH="$RN_PROJECT_PATH/unity/builds/ios"
 XCODE_PROJ_PATH="$EXPORT_PATH/Unity-iPhone.xcodeproj"
 NATIVE_CALL_PROXY_PATH="$EXPORT_PATH/Libraries/Plugins/iOS/NativeCallProxy.h"
-FRAMEWORK_PATH="$EXPORT_PATH/UnityFramework"
 PBXPROJ_FILE="$XCODE_PROJ_PATH/project.pbxproj"
-DERIVED_DATA_PATH="$HOME/Library/Developer/Xcode/DerivedData"
 IOS_DIR="$RN_PROJECT_PATH/ios"
 
-# Tên file log
-LOG_FILE="$SCRIPT_DIR/logs/export_ios.log"
-LOG_FILE_UNITY_FW="$SCRIPT_DIR/logs/unityframework_build.log"
+# Tên file log với timestamp
+LOG_FILE="$SCRIPT_DIR/logs/export_ios_$(date +%Y%m%d_%H%M%S).log"
+LOG_FILE_UNITY_FW="$SCRIPT_DIR/logs/unityframework_build_$(date +%Y%m%d_%H%M%S).log"
 
-echo "Bắt đầu xuất dự án Unity sang iOS..."
-echo "Dự án Unity: $PROJECT_PATH"
-echo "Dự án React Native: $RN_PROJECT_PATH"
-echo "Thư mục xuất tạm: $EXPORT_PATH"
-echo "Thư mục xuất cuối: $FINAL_IOS_PATH"
-
-#Xoá thư mục cũ nếu tồn tại
-if [ -d "$EXPORT_PATH" ]; then
-    rm -rf "$EXPORT_PATH"
-    echo "Đã xoá thư mục cũ: $EXPORT_PATH"
-fi
-
-# Chạy Unity để export dự án iOS
-"$UNITY_PATH" -quit -batchmode -projectPath "$PROJECT_PATH" -executeMethod ExportiOS.Export -logFile "$LOG_FILE"
-
-# Kiểm tra xem quá trình export có thành công không
-if [ ! -d "$EXPORT_PATH" ]; then
-    echo "Lỗi: Export iOS thất bại, không tìm thấy thư mục xuất."
+# Kiểm tra các điều kiện tiên quyết
+if [ ! -f "$UNITY_PATH" ]; then
+    echo "❌ Lỗi: Không tìm thấy Unity Editor tại $UNITY_PATH"
     exit 1
 fi
 
-echo "✅ Export iOS hoàn tất! Thư mục xuất: $EXPORT_PATH"
+if [ ! -d "$PROJECT_PATH" ]; then
+    echo "❌ Lỗi: Không tìm thấy dự án Unity tại $PROJECT_PATH"
+    exit 1
+fi
 
-# Thay đổi Target Membership của NativeCallProxy.h sang Public (nếu file tồn tại)
+if [ ! -d "$RN_PROJECT_PATH" ]; then
+    echo "❌ Lỗi: Không tìm thấy dự án React Native tại $RN_PROJECT_PATH"
+    exit 1
+fi
+
+# Tạo thư mục xuất cuối nếu chưa tồn tại
+mkdir -p "$FINAL_IOS_PATH"
+
+echo "===================================="
+echo "🚀 Bắt đầu xuất dự án Unity sang iOS..."
+echo "📂 Dự án Unity: $PROJECT_PATH"
+echo "📂 Dự án React Native: $RN_PROJECT_PATH"
+echo "📂 Thư mục xuất tạm: $EXPORT_PATH"
+echo "📂 Thư mục xuất cuối: $FINAL_IOS_PATH"
+echo "📜 Log file: $LOG_FILE"
+echo "===================================="
+
+# Xoá và tạo lại thư mục xuất
+rm -rf "$EXPORT_PATH"
+mkdir -p "$EXPORT_PATH"
+
+# Chạy Unity để export dự án iOS với timeout
+echo "🔄 Đang export từ Unity..."
+timeout 1800 "$UNITY_PATH" -quit -batchmode -projectPath "$PROJECT_PATH" -executeMethod ExportiOS.Export -logFile "$LOG_FILE" || {
+    echo "❌ Lỗi: Unity export thất bại hoặc timeout"
+    echo "📜 Chi tiết lỗi cuối cùng:"
+    tail -n 20 "$LOG_FILE"
+    exit 1
+}
+
+# Backup project.pbxproj trước khi chỉnh sửa
+if [ -f "$PBXPROJ_FILE" ]; then
+    cp "$PBXPROJ_FILE" "${PBXPROJ_FILE}.backup"
+    echo "📦 Đã tạo backup project.pbxproj"
+fi
+
+# Thay đổi Target Membership với xử lý lỗi
 if [ -f "$NATIVE_CALL_PROXY_PATH" ]; then
-    echo "🔧 Đang chỉnh sửa project.pbxproj để đặt NativeCallProxy.h thành Public..."
-    sed -i '' 's|\(.*NativeCallProxy.h.*PBXBuildFile; fileRef = .*; \)|\1settings = {ATTRIBUTES = (Public); }; |g' "$PBXPROJ_FILE"
-    echo "✅ Đã chỉnh sửa project.pbxproj!"
-else
-    echo "❌ Không tìm thấy NativeCallProxy.h, kiểm tra lại quá trình export!"
-    exit 1
+    echo "🔧 Đang chỉnh sửa project.pbxproj..."
+    if ! sed -i '' 's|\(.*NativeCallProxy.h.*PBXBuildFile; fileRef = .*; \)|\1settings = {ATTRIBUTES = (Public); }; |g' "$PBXPROJ_FILE"; then
+        echo "❌ Lỗi khi chỉnh sửa project.pbxproj"
+        [ -f "${PBXPROJ_FILE}.backup" ] && cp "${PBXPROJ_FILE}.backup" "$PBXPROJ_FILE"
+        exit 1
+    fi
 fi
 
 echo "🔧 Chuyển target membership của thư mục Data sang UnityFramework..."
@@ -105,4 +130,15 @@ echo "✅ Đã xóa Pods và Podfile.lock!"
 
 # Chạy lại pod install
 echo "📦 Đang cài đặt lại Pods..."
-cd "$IOS_DIR" && pod install
+cd "$IOS_DIR" && timeout 300 pod install || {
+    echo "❌ Lỗi: Pod install thất bại hoặc timeout"
+    exit 1
+}
+
+echo "===================================="
+echo "✅ Quá trình xuất iOS hoàn tất!"
+echo "📂 Framework tại: $FINAL_IOS_PATH"
+echo "📜 Log files:"
+echo "   - Unity Export: $LOG_FILE"
+echo "   - Framework Build: $LOG_FILE_UNITY_FW"
+echo "===================================="

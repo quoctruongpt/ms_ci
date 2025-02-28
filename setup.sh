@@ -1,82 +1,94 @@
-#!/bin/sh
+#!/bin/bash
 set -e  # Dừng script nếu có lỗi
+
+# Tạo thư mục logs
+mkdir -p "logs"
+LOG_FILE="logs/setup_$(date +%Y%m%d_%H%M%S).log"
+exec 1> >(tee -a "$LOG_FILE") 2>&1
 
 # Nhận tham số từ dòng lệnh
 BRANCH_RN=${1:-main}
 BRANCH_UN=${2:-main}
 
-# Thư mục chứa source code React Native 
+# Định nghĩa các biến
 PROJECT_RN_DIR="MonkeyStories"
-
-# Thư mục chứa source code Unity
 PROJECT_UN_DIR="MonkeyStories_UN"
-
-# URL của repository GitHub RN
 GIT_RN_REPO="git@github.com:quoctruongkt/MonkeyStories.git"
-
-# URL của repository GitHub UN
 GIT_UN_REPO="git@github.com:HungBuiMonkey/MS_DemoUnity.git"
-
-# Thư mục chứa script
 SCRIPTS_DIR="scripts"
-
-# Đường dẫn đến Editor trong Unity
 UNITY_EDITOR_DIR="$PROJECT_UN_DIR/Assets/Editor"
-
-# Đường dẫn đến các file export
 EXPORT_ANDROID_FILE="ExportAndroidStudio.cs"
 EXPORT_IOS_FILE="ExportiOS.cs"
 
+# Kiểm tra các điều kiện tiên quyết
+if [ ! -d "$SCRIPTS_DIR" ]; then
+    echo "❌ Lỗi: Không tìm thấy thư mục scripts!"
+    exit 1
+fi
+
+for file in "$SCRIPTS_DIR/$EXPORT_ANDROID_FILE" "$SCRIPTS_DIR/$EXPORT_IOS_FILE"; do
+    if [ ! -f "$file" ]; then
+        echo "❌ Lỗi: Không tìm thấy file $file"
+        exit 1
+    fi
+done
+
+# Hàm xử lý clone/pull repository
+handle_repository() {
+    local dir=$1
+    local repo=$2
+    local branch=$3
+    local name=$4
+
+    if [ -d "$dir" ]; then
+        echo "🔄 Đang cập nhật $name repository..."
+        (cd "$dir" && {
+            git reset --hard HEAD
+            git fetch origin || { echo "❌ Fetch thất bại cho $name!"; exit 1; }
+            git checkout "$branch" || { echo "❌ Checkout thất bại cho nhánh $branch!"; exit 1; }
+            git pull origin "$branch" || { echo "❌ Pull thất bại cho $name!"; exit 1; }
+        })
+    else
+        echo "📥 Đang clone $name repository..."
+        git clone -b "$branch" "$repo" "$dir" || { echo "❌ Clone thất bại cho $name!"; exit 1; }
+    fi
+}
+
+echo "===================================="
+echo "🚀 Bắt đầu setup dự án..."
 echo "📌 Nhánh React Native: $BRANCH_RN"
 echo "📌 Nhánh Unity: $BRANCH_UN"
+echo "📜 Log file: $LOG_FILE"
+echo "===================================="
 
-# Kiểm tra nếu thư mục đã tồn tại thì pull, nếu chưa thì clone
+# Xử lý React Native repository
+handle_repository "$PROJECT_RN_DIR" "$GIT_RN_REPO" "$BRANCH_RN" "React Native"
+
+# Cài đặt dependencies cho React Native
 if [ -d "$PROJECT_RN_DIR" ]; then
-    echo "🗑️ Đang reset và cập nhật $PROJECT_RN_DIR..."
-    cd "$PROJECT_RN_DIR" || exit
-    git reset --hard HEAD  # Loại bỏ toàn bộ thay đổi cục bộ
-    git fetch origin  # Lấy danh sách nhánh mới nhất
-    git checkout "$BRANCH_RN" || { echo "❌ Không tìm thấy nhánh $BRANCH_RN trong $PROJECT_RN_DIR!"; exit 1; }
-    git pull origin "$BRANCH_RN" || { echo "❌ Pull code thất bại!"; exit 1; }
-    npm install
-    cd ..
-else
-    echo "Cloning repository..."
-    git clone "$GIT_RN_REPO" "$PROJECT_RN_DIR" || { echo "❌ Clone thất bại!"; exit 1; }
-    cd "$PROJECT_RN_DIR" || exit
-    npm install
-    cd ..
+    echo "📦 Cài đặt dependencies cho React Native..."
+    (cd "$PROJECT_RN_DIR" && {
+        npm install || { echo "❌ npm install thất bại!"; exit 1; }
+    })
 fi
 
-# Kiểm tra nếu thư mục đã tồn tại thì pull, nếu chưa thì clone
-if [ -d "$PROJECT_UN_DIR" ]; then
-    echo "🗑️ Đang reset và cập nhật $PROJECT_UN_DIR..."
-    cd "$PROJECT_UN_DIR" || exit
-    git reset --hard HEAD  # Loại bỏ toàn bộ thay đổi cục bộ
-    git fetch origin  # Lấy danh sách nhánh mới nhất
-    git checkout "$BRANCH_UN" || { echo "❌ Không tìm thấy nhánh $BRANCH_UN trong $PROJECT_UN_DIR!"; exit 1; }
-    git pull origin "$BRANCH_UN" || { echo "❌ Pull code Unity thất bại!"; exit 1; }
-    cd ..
-else
-    echo "Cloning repository..."
-    git clone "$GIT_UN_REPO" "$PROJECT_UN_DIR" || { echo "❌ Clone Unity thất bại!"; exit 1; }
-fi
+# Xử lý Unity repository
+handle_repository "$PROJECT_UN_DIR" "$GIT_UN_REPO" "$BRANCH_UN" "Unity"
 
-# Tạo thư mục Assets/Editor nếu chưa tồn tại
+# Tạo và copy các file Editor
+echo "📂 Thiết lập Unity Editor files..."
 mkdir -p "$UNITY_EDITOR_DIR"
 
-# Kiểm tra và copy file ExportAndroidStudio.cs nếu chưa có
-if [ ! -f "$UNITY_EDITOR_DIR/$EXPORT_ANDROID_FILE" ]; then
-    echo "📂 Không tìm thấy $EXPORT_ANDROID_FILE, đang copy từ $SCRIPTS_DIR..."
-    cp "$SCRIPTS_DIR/$EXPORT_ANDROID_FILE" "$UNITY_EDITOR_DIR/"
-    echo "✅ Đã copy $EXPORT_ANDROID_FILE vào $UNITY_EDITOR_DIR"
-fi
+for file in "$EXPORT_ANDROID_FILE" "$EXPORT_IOS_FILE"; do
+    if [ ! -f "$UNITY_EDITOR_DIR/$file" ]; then
+        echo "📄 Copy $file vào Unity Editor..."
+        cp "$SCRIPTS_DIR/$file" "$UNITY_EDITOR_DIR/" || { echo "❌ Copy thất bại cho $file!"; exit 1; }
+    fi
+done
 
-# Kiểm tra và copy file ExportiOS.cs nếu chưa có
-if [ ! -f "$UNITY_EDITOR_DIR/$EXPORT_IOS_FILE" ]; then
-    echo "📂 Không tìm thấy $EXPORT_IOS_FILE, đang copy từ $SCRIPTS_DIR..."
-    cp "$SCRIPTS_DIR/$EXPORT_IOS_FILE" "$UNITY_EDITOR_DIR/"
-    echo "✅ Đã copy $EXPORT_IOS_FILE vào $UNITY_EDITOR_DIR"
-fi
-
-echo "🎉 Setup hoàn tất!"
+echo "===================================="
+echo "✅ Setup hoàn tất!"
+echo "📂 React Native: $PROJECT_RN_DIR (nhánh: $BRANCH_RN)"
+echo "📂 Unity: $PROJECT_UN_DIR (nhánh: $BRANCH_UN)"
+echo "📜 Log file: $LOG_FILE"
+echo "===================================="

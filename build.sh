@@ -15,19 +15,44 @@ if [ -z "$BUILD_TARGET" ] || [ -z "$BRANCH_RN" ] || [ -z "$BRANCH_UN" ]; then
     exit 1
 fi
 
+# Kiểm tra tính hợp lệ của BUILD_TARGET
+if [ "$BUILD_TARGET" != "android" ] && [ "$BUILD_TARGET" != "ios" ] && [ "$BUILD_TARGET" != "all" ]; then
+    echo "❌ BUILD_TARGET không hợp lệ. Chỉ chấp nhận: android, ios, hoặc all"
+    exit 1
+fi
+
+# Kiểm tra sự tồn tại của các script phụ thuộc
+for script in setup.sh export_android.sh export_ios.sh; do
+    if [ ! -f "$script" ]; then
+        echo "❌ Không tìm thấy script: $script"
+        exit 1
+    fi
+done
+
 echo "📌 Bắt đầu setup code với nhánh React Native: $BRANCH_RN và Unity: $BRANCH_UN"
-sh setup.sh "$BRANCH_RN" "$BRANCH_UN"
+if ! sh setup.sh "$BRANCH_RN" "$BRANCH_UN"; then
+    echo "❌ Lỗi khi chạy setup.sh"
+    exit 1
+fi
 
 # Chạy build Android nếu chọn android hoặc all
 if [ "$BUILD_TARGET" = "android" ] || [ "$BUILD_TARGET" = "all" ]; then
     echo "🚀 Bắt đầu build Android..."
-    sh export_android.sh
+    if ! sh export_android.sh; then
+        echo "❌ Lỗi khi build Android"
+        exit 1
+    fi
+    echo "✅ Build Android thành công"
 fi
 
 # Chạy build iOS nếu chọn ios hoặc all
 if [ "$BUILD_TARGET" = "ios" ] || [ "$BUILD_TARGET" = "all" ]; then
     echo "🚀 Bắt đầu build iOS..."
-    sh export_ios.sh
+    if ! sh export_ios.sh; then
+        echo "❌ Lỗi khi build iOS"
+        exit 1
+    fi
+    echo "✅ Build iOS thành công"
 fi
 
 echo "🎉 Build hoàn tất!"
