@@ -22,12 +22,32 @@ if [ "$BUILD_TARGET" != "android" ] && [ "$BUILD_TARGET" != "ios" ] && [ "$BUILD
 fi
 
 # Kiểm tra sự tồn tại của các script phụ thuộc
-for script in setup.sh export_android.sh export_ios.sh; do
+for script in setup.sh export_android.sh export_ios.sh check_android_env.sh check_ios_env.sh; do
     if [ ! -f "$script" ]; then
         echo "❌ Không tìm thấy script: $script"
         exit 1
     fi
 done
+
+# Kiểm tra môi trường dựa trên BUILD_TARGET
+echo "🔍 Kiểm tra môi trường build..."
+if [ "$BUILD_TARGET" = "android" ] || [ "$BUILD_TARGET" = "all" ]; then
+    echo "Kiểm tra môi trường Android..."
+    if ! sh check_android_env.sh; then
+        echo "❌ Môi trường Android chưa được cấu hình đúng"
+        exit 1
+    fi
+fi
+
+if [ "$BUILD_TARGET" = "ios" ] || [ "$BUILD_TARGET" = "all" ]; then
+    echo "Kiểm tra môi trường iOS..."
+    if ! sh check_ios_env.sh; then
+        echo "❌ Môi trường iOS chưa được cấu hình đúng"
+        exit 1
+    fi
+fi
+
+echo "✅ Kiểm tra môi trường thành công"
 
 echo "📌 Bắt đầu setup code với nhánh React Native: $BRANCH_RN và Unity: $BRANCH_UN"
 if ! sh setup.sh "$BRANCH_RN" "$BRANCH_UN"; then

@@ -2,9 +2,12 @@
 set -e  # Dừng script nếu có lỗi
 
 # Tạo thư mục logs
-mkdir -p "logs"
+mkdir -p logs && touch logs/tmp.log
 LOG_FILE="logs/setup_$(date +%Y%m%d_%H%M%S).log"
-exec 1> >(tee -a "$LOG_FILE") 2>&1
+
+# Alternative logging approach
+exec > "$LOG_FILE" 2>&1
+
 
 # Nhận tham số từ dòng lệnh
 BRANCH_RN=${1:-main}
